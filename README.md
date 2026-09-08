@@ -30,9 +30,10 @@ The following are **not** implemented and are intentionally deferred to later ph
 - authentication, trading, or brokerage functions;
 - Docker infrastructure.
 
-`src/hedgecanvas/historical` and `src/hedgecanvas/ui` remain placeholder
-packages for future phases. `src/hedgecanvas/live` now contains the Phase 2
-Deribit public market-data adapter described below.
+`src/hedgecanvas/historical` remains a placeholder package for a future
+phase. `src/hedgecanvas/live` contains the Phase 2 Deribit public
+market-data adapter, and `src/hedgecanvas/ui` + `app.py` contain the Phase 3
+live Streamlit UI, both described below.
 
 ## Domain model
 
@@ -203,6 +204,82 @@ availability. To opt in against the real Deribit production API
 HEDGECANVAS_LIVE_TESTS=1 pytest -m live tests/live/test_live_smoke.py
 ```
 
+## Phase 3 scope: the live Streamlit UI
+
+`app.py` (repository root) is HedgeCanvas's first functional product
+surface: a Streamlit dashboard that lets a user construct and understand an
+**"Indicative live market-based hedge"** for a BTC or ETH position, using
+currently observable Deribit inverse-option market data. It wires the
+Phase 1 domain engine and Phase 2 live adapter together and adds no new
+financial logic of its own — `hedgecanvas.ui` contains only formatting,
+filtering, and Plotly chart-building helpers over results those two layers
+already produced.
+
+**Supported assets:** BTC, ETH. **Supported strategies:** Unhedged,
+Protective Put, Covered Call, Collar. Nothing else.
+
+### What it does
+
+- Displays the current Deribit `BTC/USD` or `ETH/USD` index price (S0) via
+  `public/get_index_price` — never an option's `underlying_price`.
+- Lets you size a position either directly (`Underlying Quantity`) or via
+  `Portfolio Value (USD)` (`Q = portfolio_value / S0`), always converting
+  UI input through a safe Decimal/string boundary (Phase 1 rejects raw
+  floats by design).
+- For option strategies: discovers currently eligible BTC/ETH **inverse**
+  options only (never linear USDC options), lets you pick a real listed
+  expiry and strike(s) — a Collar's call-strike selector is restricted to
+  `KC >= KP` so an invalid corridor cannot be chosen — and fetches the
+  correct-side top-of-book quote (put ASK, call BID; never midpoint, mark,
+  or last price).
+- Shows both the native BTC/ETH premium and its inception USD-equivalent
+  (normalized using the same S0 snapshot as the rest of the position) —
+  the native quote is never relabeled as USD.
+- Runs Phase 2 sizing (`H` floored to the instrument's live
+  `min_trade_amount`, never rounded up) and displays `Q`, `H`, `Q-H`,
+  coverage %, and the exact Full/Partial/Zero coverage state as classified
+  by the Phase 1 domain model (never re-derived in the UI).
+- Renders the expiry payoff chart (Plotly) using `hedgecanvas.domain.pnl`
+  for both the selected strategy and the unhedged comparison curve, over a
+  deterministic scenario grid centered on S0 and the active strikes — the
+  x-axis is scenario analysis, not a forecast.
+- Shows Max Profit (explicit `Unlimited` where applicable — e.g. a partial
+  Covered Call or partial Collar's whole-portfolio upside is always
+  Unlimited), Max Loss, breakeven (single/multiple/none/degenerate
+  interval), Net Option Cost/Credit, and Protection Floor / Upside Cap
+  worded according to `BoundaryScope` (`WHOLE_PORTFOLIO` vs
+  `HEDGED_PORTION` vs no card at all).
+- Maps every Phase 2 `MarketState` to a concise warning/error/info message
+  instead of a crash or a silently substituted price; never falls back to
+  a theoretical (Black-Scholes) price when no live quote exists.
+- Caches instrument discovery briefly (60s `st.cache_data` TTL per asset);
+  index/BBO quotes are fetched fresh per request and only reused for an
+  identical (asset, strategy, expiry, strike(s), quantity) selection —
+  changing any of those never displays a stale snapshot, and an explicit
+  "Refresh quote" button is available.
+- A static "Historical Evidence — available in a later phase" notice is
+  shown; no thesis data, backtest, or metrics are loaded in Phase 3.
+
+### Running the app
+
+```bash
+streamlit run app.py
+```
+
+No API key or account is required. No trade is ever placed and no private
+Deribit endpoint is ever called.
+
+### Running the Phase 3 tests
+
+```bash
+pytest tests/ui tests/test_app_smoke.py
+```
+
+All Phase 3 tests are deterministic and offline: the presentation/view-model
+tests exercise plain functions, and the Streamlit `AppTest`-based smoke
+tests run the real `app.py` with `DeribitClient`'s HTTP-calling methods
+monkeypatched at the class level (never live network).
+
 ## Getting started
 
 ```bash
@@ -215,4 +292,12 @@ pip install -e ".[dev]"
 
 ```bash
 pytest
+```
+
+This runs the complete deterministic suite (domain + live + ui + app
+smoke), which never depends on internet access. The Phase 2 live smoke
+test against the real Deribit production API remains separately opt-in:
+
+```bash
+HEDGECANVAS_LIVE_TESTS=1 pytest -m live tests/live/test_live_smoke.py
 ```

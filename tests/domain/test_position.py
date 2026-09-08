@@ -126,6 +126,53 @@ def test_h_zero_allowed_with_no_strike_requirement_violation() -> None:
     assert pos.hedged_quantity == Decimal("0")
 
 
+def test_net_option_cost_protective_put_is_debit() -> None:
+    pos = HedgePosition(
+        Strategy.PROTECTIVE_PUT, S0="30000", Q="2", H="2", KP="28000", P="500"
+    )
+    assert pos.net_option_cost == Decimal("1000")
+
+
+def test_net_option_cost_covered_call_is_credit() -> None:
+    pos = HedgePosition(
+        Strategy.COVERED_CALL, S0="30000", Q="2", H="2", KC="32000", C="300"
+    )
+    assert pos.net_option_cost == Decimal("-600")
+
+
+def test_net_option_cost_collar_net_debit() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR,
+        S0="30000",
+        Q="1",
+        H="1",
+        KP="28000",
+        KC="32000",
+        P="500",
+        C="300",
+    )
+    assert pos.net_option_cost == Decimal("200")
+
+
+def test_net_option_cost_collar_net_credit() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR,
+        S0="30000",
+        Q="1",
+        H="1",
+        KP="28000",
+        KC="31000",
+        P="200",
+        C="600",
+    )
+    assert pos.net_option_cost == Decimal("-400")
+
+
+def test_net_option_cost_unhedged_is_zero() -> None:
+    pos = HedgePosition(Strategy.UNHEDGED, S0="30000", Q="1", H="0")
+    assert pos.net_option_cost == Decimal("0")
+
+
 def test_protective_put_missing_strike_rejected() -> None:
     with pytest.raises(ValueError):
         HedgePosition(Strategy.PROTECTIVE_PUT, S0="30000", Q="1", H="1")

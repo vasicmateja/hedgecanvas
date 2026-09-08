@@ -16,6 +16,8 @@ from hedgecanvas.live.client import (
     DeribitRPCError,
 )
 from hedgecanvas.live.instruments import (
+    EXPECTED_PRICE_INDEX,
+    SUPPORTED_ASSETS,
     InstrumentClassification,
     InverseOptionInstrument,
     classify_instrument,
@@ -41,6 +43,8 @@ __all__ = [
     "DeribitMalformedResponseError",
     "MarketState",
     "LiveResult",
+    "SUPPORTED_ASSETS",
+    "EXPECTED_PRICE_INDEX",
     "InverseOptionInstrument",
     "InstrumentClassification",
     "classify_instrument",

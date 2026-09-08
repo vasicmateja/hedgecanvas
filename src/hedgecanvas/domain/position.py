@@ -166,3 +166,11 @@ class HedgePosition:
     @property
     def has_call(self) -> bool:
         return self.strategy in _CALL_STRATEGIES
+
+    @property
+    def net_option_cost(self) -> Decimal:
+        """Net upfront option cashflow in USD: H*P (put debit) minus H*C (call credit).
+
+        Positive means a net debit (cost); negative means a net credit.
+        """
+        return self.H * self.P - self.H * self.C
