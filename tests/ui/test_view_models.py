@@ -18,6 +18,7 @@ from hedgecanvas.ui.view_models import (
     format_protection_floor,
     format_upside_cap,
     is_max_profit_negative,
+    max_profit_metric_label,
 )
 
 
@@ -44,6 +45,35 @@ def test_positive_finite_max_profit_not_flagged() -> None:
     pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
     result = analyze(pos)
     assert not is_max_profit_negative(result.max_profit)
+
+
+def test_max_profit_label_unlimited() -> None:
+    pos = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
+    result = analyze(pos)
+    assert max_profit_metric_label(result.max_profit) == "Max Profit"
+
+
+def test_max_profit_label_positive_finite() -> None:
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
+    result = analyze(pos)
+    assert max_profit_metric_label(result.max_profit) == "Max Profit"
+
+
+def test_max_profit_label_negative_is_best_case_pnl() -> None:
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="78374", Q="1", H="1", KC="71000", C="7210.43")
+    result = analyze(pos)
+    assert max_profit_metric_label(result.max_profit) == "Best-Case P&L"
+
+
+def test_max_profit_label_exactly_zero_is_maximum_pnl() -> None:
+    # KP == KC collar with a net premium that exactly offsets the flat
+    # payoff at zero: max profit == 0 exactly.
+    pos = HedgePosition(
+        Strategy.COLLAR, S0="100", Q="1", H="1", KP="100", KC="100", P="0", C="0"
+    )
+    result = analyze(pos)
+    assert result.max_profit.value == Decimal("0")
+    assert max_profit_metric_label(result.max_profit) == "Maximum P&L"
 
 
 def test_unlimited_max_profit_not_flagged_negative() -> None:

@@ -6,6 +6,45 @@ A WealthTech prototype accompanying the Master's thesis:
 
 > *"Option-Based Downside Protection for Crypto Portfolios: A WealthTech Prototype and Backtesting Study."*
 
+## Product summary
+
+HedgeCanvas is a Streamlit application with two views, selected from the
+sidebar:
+
+- **Live Designer** -- construct an indicative BTC/ETH options hedge
+  (Unhedged, Protective Put, Covered Call, or Collar) using current public
+  Deribit market data.
+- **Historical Evidence** -- a read-only view of the thesis's own frozen
+  2020-01 to 2024-12 backtest output (BTC/ETH, seven canonical
+  strategies), verified before display and never recomputed.
+
+**Supported assets:** BTC, ETH only. **Supported strategies:** Unhedged,
+Protective Put, Covered Call, Collar (Live Designer); the seven canonical
+`BENCHMARK`/`PP95`/`CC105`/`COLLAR95_105`/`PP90`/`CC110`/`COLLAR90_110`
+keys (Historical Evidence). Nothing else.
+
+**Environment:** developed and tested on **Python 3.9.6**; no newer
+Python version is required by the current dependency stack (Streamlit,
+Plotly, pandas, httpx, pytest). See [Getting started](#getting-started).
+
+**Run:** `streamlit run app.py` (see [Getting started](#getting-started)).
+
+**Limitations, in one place:**
+
+- A Live Designer quote is a top-of-book observation, not a guaranteed
+  execution price; displayed BBO depth is limited to the validation this
+  app implements (best bid/ask only -- no book-walking, no VWAP, no
+  slippage model).
+- The Live Designer's payoff chart is deterministic *scenario* analysis
+  over hypothetical terminal prices -- it is not a forecast and carries
+  no probability interpretation.
+- Historical Evidence results are specific to the frozen 2020-01 to
+  2024-12 sample and do not predict future performance.
+- HedgeCanvas is read-only market/research tooling: no account access, no
+  order placement, no authentication, no private Deribit endpoint, and no
+  theoretical pricing fallback (no Black-Scholes, no Greeks, no Monte
+  Carlo) anywhere in this repository.
+
 ## Phase 1 scope
 
 Phase 1 implements the exchange-agnostic **domain layer** only:

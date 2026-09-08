@@ -85,6 +85,7 @@ from hedgecanvas.ui.view_models import (
     format_protection_floor,
     format_upside_cap,
     is_max_profit_negative,
+    max_profit_metric_label,
 )
 
 ASSETS = ("BTC", "ETH")
@@ -239,7 +240,8 @@ def render_live_designer() -> None:
     # -- S0: current Deribit index price for the selected asset --------------
 
     price_index_name = EXPECTED_PRICE_INDEX[asset]
-    index_result = fetch_index_price(client, price_index_name)
+    with st.spinner(f"Fetching current {asset}/USD index price..."):
+        index_result = fetch_index_price(client, price_index_name)
 
     st.markdown("---")
     status_col, s0_col, q_col, value_col = st.columns(4)
@@ -290,7 +292,8 @@ def render_live_designer() -> None:
 
     instruments: List[InverseOptionInstrument] = []
     if needs_put or needs_call:
-        disc_state, disc_value, disc_message = get_eligible_instruments(client, asset)
+        with st.spinner(f"Loading eligible {asset} contracts..."):
+            disc_state, disc_value, disc_message = get_eligible_instruments(client, asset)
         if disc_state is not MarketState.OK:
             display = describe_market_state(disc_state)
             getattr(st, display.severity)(f"Instrument discovery: {display.message}")
@@ -378,6 +381,7 @@ def render_live_designer() -> None:
 
     position: Optional[HedgePosition] = None
     quote: Optional[LiveHedgeQuote] = None
+    quote_fetched_at: Optional[datetime] = None
 
     if strategy is Strategy.UNHEDGED:
         position = HedgePosition(strategy=Strategy.UNHEDGED, S0=S0, Q=Q, H=Decimal(0))
@@ -389,17 +393,20 @@ def render_live_designer() -> None:
 
         if cached is not None:
             quote = cached.value
+            quote_fetched_at = cached.fetched_at
         else:
-            if strategy is Strategy.PROTECTIVE_PUT:
-                assert put_instrument is not None
-                quote = build_protective_put_quote(client, put_instrument, Q)
-            elif strategy is Strategy.COVERED_CALL:
-                assert call_instrument is not None
-                quote = build_covered_call_quote(client, call_instrument, Q)
-            else:
-                assert put_instrument is not None and call_instrument is not None
-                quote = build_collar_quote(client, put_instrument, call_instrument, Q)
-            store_snapshot(st.session_state, request_key, quote)
+            with st.spinner("Fetching live quote..."):
+                if strategy is Strategy.PROTECTIVE_PUT:
+                    assert put_instrument is not None
+                    quote = build_protective_put_quote(client, put_instrument, Q)
+                elif strategy is Strategy.COVERED_CALL:
+                    assert call_instrument is not None
+                    quote = build_covered_call_quote(client, call_instrument, Q)
+                else:
+                    assert put_instrument is not None and call_instrument is not None
+                    quote = build_collar_quote(client, put_instrument, call_instrument, Q)
+            snapshot = store_snapshot(st.session_state, request_key, quote)
+            quote_fetched_at = snapshot.fetched_at
 
         if quote.state is not MarketState.OK and quote.state is not MarketState.BELOW_MINIMUM_SIZE:
             display = describe_market_state(quote.state)
@@ -451,7 +458,7 @@ def render_live_designer() -> None:
                 "unhedged underlying position only."
             )
         m1, m2 = st.columns(2)
-        m1.metric("Max Profit", format_max_profit(result.max_profit))
+        m1.metric(max_profit_metric_label(result.max_profit), format_max_profit(result.max_profit))
         m2.metric("Max Loss", format_max_loss(result.max_loss))
         if is_max_profit_negative(result.max_profit):
             st.caption(
@@ -484,6 +491,11 @@ def render_live_designer() -> None:
 
     if quote is not None and (quote.put_quote is not None or quote.call_quote is not None):
         st.subheader("Quote details")
+        if quote_fetched_at is not None:
+            st.caption(
+                f"Quote captured: {quote_fetched_at.strftime('%Y-%m-%d %H:%M:%S UTC')} "
+                "-- applies only to this exact asset/strategy/expiry/strike/quantity selection."
+            )
 
         def _render_leg(label: str, instrument: InverseOptionInstrument, q) -> None:
             st.markdown(f"**{label}: {instrument.instrument_name}**")
@@ -495,7 +507,9 @@ def render_live_designer() -> None:
             cols[2].markdown(f"Quote side\n\n{q.quote_side.upper()}")
             cols[3].markdown(f"BBO amount\n\n{format_quantity(q.best_quote_amount)} {q.premium_currency}")
             cols2 = st.columns(2)
-            cols2[0].markdown(f"Native premium ({q.premium_currency})\n\n{q.premium_native}")
+            cols2[0].markdown(
+                f"Native premium ({q.premium_currency})\n\n{format_quantity(q.premium_native)}"
+            )
             usd_equiv = q.premium_native * position.S0
             cols2[1].markdown(f"Inception USD-equivalent\n\n{format_usd(usd_equiv)}")
             st.caption(
@@ -573,7 +587,6 @@ def render_historical_evidence() -> None:
     )
 
     if not evidence.metrics_available and not evidence.wealth_available:
-        display = describe_historical_state(evidence.metrics.state)
         st.error("Historical thesis evidence unavailable: artifact verification failed.")
         st.caption(
             f"Place the canonical CSV files in `{evidence.directory}` "

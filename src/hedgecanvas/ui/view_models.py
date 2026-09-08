@@ -47,6 +47,26 @@ def is_max_profit_negative(result: MaxProfitResult) -> bool:
     return (not result.is_unlimited) and result.value is not None and result.value < 0
 
 
+def max_profit_metric_label(result: MaxProfitResult) -> str:
+    """The metric-card label to pair with ``format_max_profit``.
+
+    Unlimited or a genuine positive best case keeps the familiar "Max
+    Profit" label. A finite, non-positive best case avoids implying a
+    "profit" that isn't there: exactly zero is labeled "Maximum P&L",
+    and a net loss even in the best case is labeled "Best-Case P&L".
+    This changes only the label text -- the underlying Phase 1 value is
+    never altered.
+    """
+    if result.is_unlimited:
+        return "Max Profit"
+    assert result.value is not None
+    if result.value > 0:
+        return "Max Profit"
+    if result.value == 0:
+        return "Maximum P&L"
+    return "Best-Case P&L"
+
+
 def format_max_loss(result: MaxLossResult) -> str:
     return format_usd(result.max_loss)
 
