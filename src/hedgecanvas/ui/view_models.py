@@ -38,6 +38,15 @@ def format_max_profit(result: MaxProfitResult) -> str:
     return format_usd(result.value)
 
 
+def is_max_profit_negative(result: MaxProfitResult) -> bool:
+    """True when Max Profit is finite and negative: even the best-case
+    terminal price for this strategy at its selected strikes is a net
+    loss. A presentation-only check over the existing Phase 1 result --
+    computes nothing new.
+    """
+    return (not result.is_unlimited) and result.value is not None and result.value < 0
+
+
 def format_max_loss(result: MaxLossResult) -> str:
     return format_usd(result.max_loss)
 

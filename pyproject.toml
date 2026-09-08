@@ -13,6 +13,7 @@ dependencies = [
     "httpx>=0.27",
     "streamlit>=1.38,<2",
     "plotly>=5.22,<8",
+    "pandas>=2.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -27,4 +28,5 @@ where = ["src"]
 testpaths = ["tests"]
 markers = [
     "live: requires network access to the real Deribit production API; skipped unless HEDGECANVAS_LIVE_TESTS=1 is set",
+    "canonical_artifacts: requires the real canonical historical CSV artifacts on disk; skipped unless HEDGECANVAS_HISTORICAL_DIR (or the default data/historical/frozen/) contains them",
 ]

@@ -17,6 +17,7 @@ from hedgecanvas.ui.view_models import (
     format_net_option_cost,
     format_protection_floor,
     format_upside_cap,
+    is_max_profit_negative,
 )
 
 
@@ -30,6 +31,25 @@ def test_finite_max_profit_presentation() -> None:
     pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
     result = analyze(pos)
     assert format_max_profit(result.max_profit) == "$5,300.00"
+
+
+def test_negative_max_profit_flagged() -> None:
+    # A deep-ITM written call: even the best case is a net loss.
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="78374", Q="1", H="1", KC="71000", C="7210.43")
+    result = analyze(pos)
+    assert is_max_profit_negative(result.max_profit)
+
+
+def test_positive_finite_max_profit_not_flagged() -> None:
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
+    result = analyze(pos)
+    assert not is_max_profit_negative(result.max_profit)
+
+
+def test_unlimited_max_profit_not_flagged_negative() -> None:
+    pos = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
+    result = analyze(pos)
+    assert not is_max_profit_negative(result.max_profit)
 
 
 def test_max_loss_formatting() -> None:

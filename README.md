@@ -30,10 +30,10 @@ The following are **not** implemented and are intentionally deferred to later ph
 - authentication, trading, or brokerage functions;
 - Docker infrastructure.
 
-`src/hedgecanvas/historical` remains a placeholder package for a future
-phase. `src/hedgecanvas/live` contains the Phase 2 Deribit public
-market-data adapter, and `src/hedgecanvas/ui` + `app.py` contain the Phase 3
-live Streamlit UI, both described below.
+`src/hedgecanvas/live` contains the Phase 2 Deribit public market-data
+adapter, `src/hedgecanvas/ui` + `app.py` contain the Phase 3 live Streamlit
+UI, and `src/hedgecanvas/historical` contains the Phase 4 read-only
+Historical Evidence layer -- all described below.
 
 ## Domain model
 
@@ -280,6 +280,122 @@ tests exercise plain functions, and the Streamlit `AppTest`-based smoke
 tests run the real `app.py` with `DeribitClient`'s HTTP-calling methods
 monkeypatched at the class level (never live network).
 
+## Phase 4 scope: Historical Thesis Evidence (read-only)
+
+`src/hedgecanvas/historical` is a strictly **read-only** layer over two
+frozen canonical artifacts produced by the thesis's own backtest run. It
+never recomputes, reruns, or reconstructs anything from that research --
+it only fail-closed verifies the two files and reads stored values.
+`app.py`'s sidebar **View** control (`Live Designer` / `Historical
+Evidence`) switches between this and the Phase 3 designer; only the
+selected view executes on a given rerun, so choosing Historical Evidence
+never triggers a Deribit API call, and choosing Live Designer never loads
+the historical artifacts.
+
+**Hard separation from the Live Designer:** Historical Evidence is frozen
+Deribit/Tardis thesis output over a fixed 2020-01 to 2024-12 sample; the
+Live Designer is current Deribit public-market data. Neither path feeds
+the other -- the historical loader never imports the live Deribit client,
+and the live adapter never reads the historical CSVs (enforced by a
+dedicated test, `tests/historical/test_separation.py`).
+
+### Canonical artifacts
+
+| File | Expected SHA-256 | Expected rows |
+|---|---|---|
+| `strategy_metrics.csv` | `eb7c38...488c70` | 14 |
+| `monthly_backtest_results.csv` | `ee276e...760a0a5` | 840 |
+
+(Full hashes are kept in `hedgecanvas.historical.config` and shown in the
+UI's provenance expander -- not printed in full here.) Both files must also
+match an **exact ordered column schema** (see `config.py`); a reordered,
+missing, or extra column fails validation just like a hash mismatch.
+
+Production Run ID (shown in the UI's provenance expander):
+`0cc87d60337032ec493534d312fc84734c5a4ae6a34b5687424f0761937d6132`
+
+### Where to place the files
+
+Default location (repository-relative, not committed):
+
+```
+data/historical/frozen/strategy_metrics.csv
+data/historical/frozen/monthly_backtest_results.csv
+```
+
+Or point at any other read-only location with:
+
+```bash
+export HEDGECANVAS_HISTORICAL_DIR=/path/to/your/frozen/artifacts
+```
+
+The files are only ever read, never written, copied, or modified by
+HedgeCanvas. If they are absent or fail verification, Historical Evidence
+shows a clean "unavailable" state (with a technical-details expander) and
+the Live Designer keeps working normally -- historical artifact presence
+is never a prerequisite for launching the app.
+
+### Fail-closed validation
+
+Each artifact is independently checked, in order: file exists → SHA-256 of
+the raw file bytes matches exactly → column schema matches exactly
+(names **and** order) → row count matches exactly → `asset`/`strategy`
+columns contain only the seven canonical keys. Any single failure stops
+at that check and returns a structured state (`FILE_MISSING`,
+`HASH_MISMATCH`, `SCHEMA_MISMATCH`, `ROW_COUNT_MISMATCH`, `INVALID_KEYS`,
+`READ_PARSE_FAILURE`, or `AVAILABLE`) -- the file is never partially
+trusted, reordered-and-continued, repaired, or regenerated.
+
+### Canonical keys and views
+
+Assets: `BTC`, `ETH`. Strategies (literal, never inferred from display
+labels): `BENCHMARK`, `PP95`, `CC105`, `COLLAR95_105`, `PP90`, `CC110`,
+`COLLAR90_110`. **Primary** view = `BENCHMARK, PP95, CC105, COLLAR95_105`;
+**Robustness** view = `BENCHMARK, PP90, CC110, COLLAR90_110`. No strike,
+DTE, moneyness, quote-age, transaction, date-range, or rebalance controls
+are exposed -- the user only picks Asset and Primary/Robustness.
+
+### No recomputation, ever
+
+HedgeCanvas reads, verifies, filters, sorts, formats, and plots stored
+values -- nothing more. It never reruns a backtest, reconstructs a wealth
+path, derives a new risk metric, or recomputes premium cost or upside
+shortfall. The wealth-path chart plots the stored `wealth_end` column
+directly, in `decision_month` order; it never cumulates `strategy_return`,
+never uses `wealth_start` to manufacture a value, and never renormalizes.
+Metric cards (Cumulative/Annualized Return, Annualized Volatility, Max
+Monthly Drawdown, Downside Deviation, Sortino Ratio, Net Premium Cost, and
+Upside Shortfall) show the eight stored `strategy_metrics.csv` columns
+with display-only formatting (e.g. a stored `0.679` shown as `67.92%`) --
+the underlying numeric values are never altered. Net Premium Cost and
+Upside Shortfall are explicitly labeled as cumulative, summed values, never
+as annualized or averaged figures.
+
+### Running the Phase 4 tests
+
+```bash
+pytest tests/historical tests/ui/test_historical_view_models.py tests/ui/test_historical_chart.py tests/ui/test_historical_messages.py
+```
+
+These are fully offline: they build small fixture CSVs on the fly (never
+the real canonical files) and check fixture-specific expected hashes,
+never weakening the hardcoded production hashes used by
+`hedgecanvas.historical.loader`.
+
+### Optional: canonical-artifact smoke check
+
+If you have placed the real canonical files locally, you can run a
+read-only smoke validation against them directly (byte-for-byte hash,
+exact schema, exact row count, and literal-key filtering/wealth
+extraction):
+
+```bash
+pytest -m canonical_artifacts -v -s tests/historical/test_canonical_smoke.py
+```
+
+This is skipped automatically (not failed) when the real files aren't
+present in the resolved historical directory.
+
 ## Getting started
 
 ```bash
@@ -294,10 +410,17 @@ pip install -e ".[dev]"
 pytest
 ```
 
-This runs the complete deterministic suite (domain + live + ui + app
-smoke), which never depends on internet access. The Phase 2 live smoke
-test against the real Deribit production API remains separately opt-in:
+This runs the complete deterministic suite (domain + live + ui + historical
++ app smoke), which never depends on internet access and never requires
+the real canonical historical CSVs. Two things remain separately opt-in:
 
 ```bash
+# Phase 2: live smoke test against the real Deribit production API (public methods only)
 HEDGECANVAS_LIVE_TESTS=1 pytest -m live tests/live/test_live_smoke.py
+
+# Phase 4: read-only smoke validation against the real canonical historical artifacts, if present
+pytest -m canonical_artifacts -v -s tests/historical/test_canonical_smoke.py
 ```
+
+No trading, authentication, or backtest-recomputation functionality
+exists anywhere in this repository.
