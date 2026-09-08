@@ -30,12 +30,9 @@ The following are **not** implemented and are intentionally deferred to later ph
 - authentication, trading, or brokerage functions;
 - Docker infrastructure.
 
-`src/hedgecanvas/live`, `src/hedgecanvas/historical`, and `src/hedgecanvas/ui` exist
-only as placeholder packages for future phases.
-
-**No live market integration exists yet.** All analysis is a closed-form,
-deterministic function of user-supplied inputs (`S0`, `Q`, `H`, strikes,
-premiums); nothing in this repository calls an external API.
+`src/hedgecanvas/historical` and `src/hedgecanvas/ui` remain placeholder
+packages for future phases. `src/hedgecanvas/live` now contains the Phase 2
+Deribit public market-data adapter described below.
 
 ## Domain model
 
@@ -103,6 +100,108 @@ inserted blindly. Max Profit is represented as either a finite value or an
 explicit "unlimited" state — never approximated with an arbitrarily large
 number. Breakeven is solved analytically per segment (no numerical grid
 scan) and can report zero, one, multiple, or a degenerate zero-PnL interval.
+
+## Phase 2 scope: Deribit public live market-data adapter
+
+`src/hedgecanvas/live` is a **read-only, public-API-only** adapter that
+turns current Deribit BTC/ETH inverse-option market data into the inputs
+the Phase 1 domain model expects. It does not compute any payoff itself —
+`hedgecanvas.domain` remains the only payoff/analysis authority.
+
+**No API key. No authentication. No trading. No order placement.** Only
+Deribit's public JSON-RPC methods are called:
+
+- `public/get_instruments` — discover current, non-expired BTC/ETH options;
+- `public/get_index_price` — the live S0 (spot/reference) reading;
+- `public/get_order_book` (depth=1) — top-of-book bid/ask for a selected contract;
+- `public/test` — optional connectivity check, used only by the live smoke test.
+
+### Inverse-option scope, explicitly
+
+Only **BTC/ETH inverse options** are considered eligible. An instrument
+must satisfy the full coherent metadata set — `kind == "option"`,
+`base_currency`/`settlement_currency == BTC or ETH`, `counter_currency ==
+"USD"`, `price_index` matching the asset's USD index, `contract_size ==
+1`, `is_active`, `state == "open"` when present, `instrument_type ==
+"reversed"` when present, and `instrument_name` not containing `"_USDC-"`.
+**Linear USDC-settled options are always excluded** and never silently
+mixed in. The instrument's `option_type` field is canonical for call/put
+identification; the trailing `C`/`P` in the instrument name is checked
+only as a secondary consistency check.
+
+### S0 (index) convention
+
+S0 is always `public/get_index_price(price_index)` for the selected
+instrument's own `price_index` metadata — **never** the option's
+`underlying_price` (which belongs to Deribit's forward/IV framework, not
+the live spot reference the Phase 1 payoff model needs). The index
+snapshot (name, price, retrieval time) is recorded alongside the result.
+
+### Native premium and USD-equivalent conversion
+
+Inverse BTC/ETH option prices are native BTC/ETH amounts per underlying
+unit. The adapter always reads the correct BBO side — **never** midpoint,
+mark price, or last trade:
+
+- Protective Put (long put): best **ask**;
+- Covered Call (written call): best **bid**;
+- Collar: put leg **ask**, call leg **bid**.
+
+The native quote is retained (`premium_native`, `premium_currency`,
+`quote_side`, `best_quote_amount`) and never overwritten. It is converted
+into the Phase 1 USD-per-unit inception convention using the *same* S0
+snapshot for both legs of a Collar:
+
+```
+P = put_best_ask_native * S0
+C = call_best_bid_native * S0
+```
+
+### Sizing / coverage convention
+
+Given a user-supplied underlying quantity `Q`, the hedged amount `H` is the
+largest multiple of the instrument's live `min_trade_amount` that is `<=
+Q` — **never rounded up**. If `Q` is below one minimum tradable unit, `H =
+0` and a `BELOW_MINIMUM_SIZE` state is returned. Full/partial/zero
+coverage classification is delegated entirely to the Phase 1
+`HedgePosition` (`H == Q` exactly), so live and static analysis always
+agree. A Collar requires both legs to share the same `min_trade_amount`
+(and therefore the same `H`); otherwise an `INCONSISTENT_METADATA` state
+is returned.
+
+### BBO depth validation
+
+After computing `H`, the top-of-book *amount* at the required side must be
+`>= H`, or the adapter returns `INSUFFICIENT_BBO_DEPTH`. Only depth=1 is
+read — Phase 2 never walks the deeper book or computes VWAP/slippage.
+Even a passing check only describes an **indicative live market-based
+hedge**, not a guaranteed executable one.
+
+### Structured failure states
+
+Every operation returns a typed `MarketState` rather than `None`: `OK`,
+`NO_QUOTE`, `BELOW_MINIMUM_SIZE`, `INSUFFICIENT_BBO_DEPTH`,
+`INSTRUMENT_INACTIVE`, `UNSUPPORTED_INSTRUMENT`, `INCONSISTENT_METADATA`,
+`NETWORK_ERROR`, `HTTP_ERROR`, `RPC_ERROR`, `MALFORMED_RESPONSE`.
+
+### Running the mock tests
+
+```bash
+pytest tests/live
+```
+
+All adapter tests use deterministic mocked HTTP responses (`httpx.MockTransport`)
+and never touch the network.
+
+### Running the optional live smoke test
+
+Skipped by default so normal test runs never depend on internet
+availability. To opt in against the real Deribit production API
+(read-only, public methods only):
+
+```bash
+HEDGECANVAS_LIVE_TESTS=1 pytest -m live tests/live/test_live_smoke.py
+```
 
 ## Getting started
 
