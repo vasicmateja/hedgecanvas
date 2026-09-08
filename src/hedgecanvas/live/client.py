@@ -78,7 +78,12 @@ class DeribitClient:
         self._owns_client = http_client is None
         self._base_url = base_url.rstrip("/")
         self._http_client = http_client or httpx.Client(
-            timeout=httpx.Timeout(connect=connect_timeout, read=read_timeout)
+            timeout=httpx.Timeout(
+                connect=connect_timeout,
+                read=read_timeout,
+                write=read_timeout,
+                pool=read_timeout,
+            )
         )
         self._id_counter = itertools.count(1)
 

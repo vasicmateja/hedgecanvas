@@ -4,12 +4,40 @@ import httpx
 import pytest
 
 from hedgecanvas.live.client import (
+    DeribitClient,
     DeribitHTTPError,
     DeribitMalformedResponseError,
     DeribitNetworkError,
     DeribitRPCError,
 )
 from tests.live.helpers import make_raw_response_client
+
+
+def test_client_constructs_with_default_timeout_without_raising() -> None:
+    # Regression: httpx.Timeout requires either a default or all four
+    # parameters (connect/read/write/pool) set explicitly; constructing the
+    # client must not raise before any network request is made.
+    client = DeribitClient()
+    try:
+        timeout = client._http_client.timeout
+        assert timeout.connect == 5.0
+        assert timeout.read == 10.0
+        assert timeout.write == 10.0
+        assert timeout.pool == 10.0
+    finally:
+        client.close()
+
+
+def test_client_constructs_with_custom_timeouts_without_raising() -> None:
+    client = DeribitClient(connect_timeout=2.5, read_timeout=7.5)
+    try:
+        timeout = client._http_client.timeout
+        assert timeout.connect == 2.5
+        assert timeout.read == 7.5
+        assert timeout.write == 7.5
+        assert timeout.pool == 7.5
+    finally:
+        client.close()
 
 
 def test_http_timeout_raises_network_error() -> None:
