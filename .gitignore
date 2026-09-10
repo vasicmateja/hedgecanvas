@@ -220,3 +220,4 @@ __marimo__/
 # Frozen historical thesis artifacts (Phase 4): read-only local input,
 # never committed. See data/historical/frozen/README.md.
 /data/historical/frozen/*.csv
+.DS_Store

@@ -52,9 +52,17 @@ def test_chart_hedged_strategy_has_two_traces() -> None:
     assert trace_names == {"Selected Strategy", "Unhedged Portfolio"}
 
 
-def test_chart_axis_titles() -> None:
+def test_chart_axis_titles_generic_without_asset() -> None:
     pos = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
     grid = build_scenario_grid(pos.S0, [], num_points=11)
     fig = build_payoff_figure(pos, grid)
-    assert fig.layout.xaxis.title.text == "Hypothetical Terminal Underlying Price ST (USD)"
-    assert fig.layout.yaxis.title.text == "Portfolio P&L at Expiry (USD)"
+    assert fig.layout.xaxis.title.text == "Underlying Price at Expiry (USD)"
+    assert fig.layout.yaxis.title.text == "Portfolio Profit / Loss at Expiry (USD)"
+
+
+def test_chart_axis_titles_use_plain_english_asset_name() -> None:
+    pos = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
+    grid = build_scenario_grid(pos.S0, [], num_points=11)
+    fig = build_payoff_figure(pos, grid, asset="BTC")
+    assert fig.layout.xaxis.title.text == "BTC Price at Expiry (USD)"
+    assert fig.layout.yaxis.title.text == "Portfolio Profit / Loss at Expiry (USD)"

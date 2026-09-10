@@ -29,7 +29,7 @@ tool can reproduce each image in a few minutes.
 Anything captured from the **Live Designer** is a product demonstration
 against real, currently-changing Deribit market data -- it is not
 reproducible research evidence, and a later capture will show different
-numbers. Anything captured from **Historical Evidence** reflects the
+numbers. Anything captured from **Historical Backtest** reflects the
 frozen 2020-01 to 2024-12 production sample (Run ID
 `0cc87d60337032ec493534d312fc84734c5a4ae6a34b5687424f0761937d6132`) and
 should be identical on any future capture against the same canonical

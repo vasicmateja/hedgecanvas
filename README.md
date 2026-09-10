@@ -14,14 +14,15 @@ sidebar:
 - **Live Designer** -- construct an indicative BTC/ETH options hedge
   (Unhedged, Protective Put, Covered Call, or Collar) using current public
   Deribit market data.
-- **Historical Evidence** -- a read-only view of the thesis's own frozen
+- **Historical Backtest** -- a read-only view of the thesis's own frozen
   2020-01 to 2024-12 backtest output (BTC/ETH, seven canonical
   strategies), verified before display and never recomputed.
 
 **Supported assets:** BTC, ETH only. **Supported strategies:** Unhedged,
 Protective Put, Covered Call, Collar (Live Designer); the seven canonical
 `BENCHMARK`/`PP95`/`CC105`/`COLLAR95_105`/`PP90`/`CC110`/`COLLAR90_110`
-keys (Historical Evidence). Nothing else.
+keys, shown to the user as "Main Strategies" / "Wider Strike Settings"
+(Historical Backtest). Nothing else.
 
 **Environment:** developed and tested on **Python 3.9.6**; no newer
 Python version is required by the current dependency stack (Streamlit,
@@ -38,7 +39,7 @@ Plotly, pandas, httpx, pytest). See [Getting started](#getting-started).
 - The Live Designer's payoff chart is deterministic *scenario* analysis
   over hypothetical terminal prices -- it is not a forecast and carries
   no probability interpretation.
-- Historical Evidence results are specific to the frozen 2020-01 to
+- Historical Backtest results are specific to the frozen 2020-01 to
   2024-12 sample and do not predict future performance.
 - HedgeCanvas is read-only market/research tooling: no account access, no
   order placement, no authentication, no private Deribit endpoint, and no
@@ -72,7 +73,8 @@ The following are **not** implemented and are intentionally deferred to later ph
 `src/hedgecanvas/live` contains the Phase 2 Deribit public market-data
 adapter, `src/hedgecanvas/ui` + `app.py` contain the Phase 3 live Streamlit
 UI, and `src/hedgecanvas/historical` contains the Phase 4 read-only
-Historical Evidence layer -- all described below.
+Historical Backtest layer (user-facing name; the code/tests still refer
+to it as "historical evidence") -- all described below.
 
 ## Domain model
 
@@ -296,8 +298,9 @@ Protective Put, Covered Call, Collar. Nothing else.
   identical (asset, strategy, expiry, strike(s), quantity) selection —
   changing any of those never displays a stale snapshot, and an explicit
   "Refresh quote" button is available.
-- A static "Historical Evidence — available in a later phase" notice is
-  shown; no thesis data, backtest, or metrics are loaded in Phase 3.
+- A footer notice points to the separate Historical Backtest view
+  (implemented in Phase 4, see below); no thesis data, backtest, or
+  metrics are loaded by the Live Designer itself.
 
 ### Running the app
 
@@ -319,19 +322,21 @@ tests exercise plain functions, and the Streamlit `AppTest`-based smoke
 tests run the real `app.py` with `DeribitClient`'s HTTP-calling methods
 monkeypatched at the class level (never live network).
 
-## Phase 4 scope: Historical Thesis Evidence (read-only)
+## Phase 4 scope: Historical Backtest (read-only)
 
+User-facing name: **Historical Backtest — 2020–2024**. Internally (code,
+tests, this section) it is still referred to as "historical evidence" --
 `src/hedgecanvas/historical` is a strictly **read-only** layer over two
 frozen canonical artifacts produced by the thesis's own backtest run. It
 never recomputes, reruns, or reconstructs anything from that research --
 it only fail-closed verifies the two files and reads stored values.
 `app.py`'s sidebar **View** control (`Live Designer` / `Historical
-Evidence`) switches between this and the Phase 3 designer; only the
-selected view executes on a given rerun, so choosing Historical Evidence
+Backtest`) switches between this and the Phase 3 designer; only the
+selected view executes on a given rerun, so choosing Historical Backtest
 never triggers a Deribit API call, and choosing Live Designer never loads
 the historical artifacts.
 
-**Hard separation from the Live Designer:** Historical Evidence is frozen
+**Hard separation from the Live Designer:** Historical Backtest is frozen
 Deribit/Tardis thesis output over a fixed 2020-01 to 2024-12 sample; the
 Live Designer is current Deribit public-market data. Neither path feeds
 the other -- the historical loader never imports the live Deribit client,
@@ -369,7 +374,7 @@ export HEDGECANVAS_HISTORICAL_DIR=/path/to/your/frozen/artifacts
 ```
 
 The files are only ever read, never written, copied, or modified by
-HedgeCanvas. If they are absent or fail verification, Historical Evidence
+HedgeCanvas. If they are absent or fail verification, Historical Backtest
 shows a clean "unavailable" state (with a technical-details expander) and
 the Live Designer keeps working normally -- historical artifact presence
 is never a prerequisite for launching the app.
@@ -389,10 +394,14 @@ trusted, reordered-and-continued, repaired, or regenerated.
 
 Assets: `BTC`, `ETH`. Strategies (literal, never inferred from display
 labels): `BENCHMARK`, `PP95`, `CC105`, `COLLAR95_105`, `PP90`, `CC110`,
-`COLLAR90_110`. **Primary** view = `BENCHMARK, PP95, CC105, COLLAR95_105`;
-**Robustness** view = `BENCHMARK, PP90, CC110, COLLAR90_110`. No strike,
-DTE, moneyness, quote-age, transaction, date-range, or rebalance controls
-are exposed -- the user only picks Asset and Primary/Robustness.
+`COLLAR90_110`. **Main Strategies** (canonical `PRIMARY`) =
+`BENCHMARK, PP95, CC105, COLLAR95_105`; **Wider Strike Settings**
+(canonical `ROBUSTNESS`) = `BENCHMARK, PP90, CC110, COLLAR90_110`. The
+user-facing labels are presentation only (see
+`hedgecanvas.ui.historical_view_models`); the canonical `HistoricalView`
+enum and strategy-set membership never change. No strike, DTE, moneyness,
+quote-age, transaction, date-range, or rebalance controls are exposed --
+the user only picks Asset and Main Strategies/Wider Strike Settings.
 
 ### No recomputation, ever
 

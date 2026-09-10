@@ -10,6 +10,7 @@ from hedgecanvas.domain import (
     analyze,
 )
 from hedgecanvas.ui.view_models import (
+    collar_equal_strikes_note,
     format_breakeven,
     format_coverage_state,
     format_max_loss,
@@ -19,6 +20,9 @@ from hedgecanvas.ui.view_models import (
     format_upside_cap,
     is_max_profit_negative,
     max_profit_metric_label,
+    partial_coverage_note,
+    strategy_description,
+    unlimited_max_profit_note,
 )
 
 
@@ -199,3 +203,123 @@ def test_partial_covered_call_never_shows_whole_portfolio_cap() -> None:
     text = format_upside_cap(pos, result.upside_cap_scope)
     assert text is not None
     assert "Whole-portfolio" not in text
+
+
+# ---------------------------------------------------------------------------
+# UX comprehension helpers (final polish pass)
+# ---------------------------------------------------------------------------
+
+
+def test_unlimited_note_for_partial_covered_call() -> None:
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="10", H="4", KC="65000", C="300")
+    result = analyze(pos)
+    note = unlimited_max_profit_note(pos, result.max_profit, "BTC")
+    assert note is not None
+    assert "6 BTC" in note
+    assert "uncapped" in note.lower()
+
+
+def test_unlimited_note_for_partial_collar() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR, S0="60000", Q="10", H="4", KP="55000", KC="65000", P="500", C="300"
+    )
+    result = analyze(pos)
+    note = unlimited_max_profit_note(pos, result.max_profit, "ETH")
+    assert note is not None
+    assert "6 ETH" in note
+
+
+def test_unlimited_note_residual_matches_q_minus_h() -> None:
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="10", H="4", KC="65000", C="300")
+    result = analyze(pos)
+    note = unlimited_max_profit_note(pos, result.max_profit, "BTC")
+    assert note is not None
+    expected_residual = pos.Q - pos.H
+    assert str(expected_residual) in note or "6 BTC" in note
+    assert pos.unhedged_residual_quantity == expected_residual
+
+
+def test_full_covered_call_gets_no_unlimited_note() -> None:
+    # Full coverage: finite Max Profit, so the note must not appear.
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
+    result = analyze(pos)
+    assert not result.max_profit.is_unlimited
+    assert unlimited_max_profit_note(pos, result.max_profit, "BTC") is None
+
+
+def test_protective_put_never_gets_unlimited_note() -> None:
+    # Protective Put is always Unlimited but for a different reason (no
+    # call at all) -- the residual-uncapped explanation doesn't apply.
+    pos = HedgePosition(Strategy.PROTECTIVE_PUT, S0="60000", Q="10", H="4", KP="55000", P="500")
+    result = analyze(pos)
+    assert result.max_profit.is_unlimited
+    assert unlimited_max_profit_note(pos, result.max_profit, "BTC") is None
+
+
+def test_unhedged_never_gets_unlimited_note() -> None:
+    pos = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
+    result = analyze(pos)
+    assert unlimited_max_profit_note(pos, result.max_profit, "BTC") is None
+
+
+def test_full_collar_kp_equals_kc_gets_whole_position_lock_note() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR, S0="60000", Q="1", H="1", KP="60000", KC="60000", P="100", C="100"
+    )
+    note = collar_equal_strikes_note(pos, "BTC")
+    assert note is not None
+    assert "fully covered" in note.lower()
+    assert "locked" in note.lower()
+    assert "hedged portion" not in note.lower()
+
+
+def test_partial_collar_kp_equals_kc_gets_hedged_portion_note() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR, S0="60000", Q="10", H="4", KP="60000", KC="60000", P="100", C="100"
+    )
+    note = collar_equal_strikes_note(pos, "BTC")
+    assert note is not None
+    assert "hedged portion" in note.lower()
+    assert "6 BTC" in note
+    assert "fully covered" not in note.lower()
+
+
+def test_collar_unequal_strikes_gets_no_note() -> None:
+    pos = HedgePosition(
+        Strategy.COLLAR, S0="60000", Q="1", H="1", KP="55000", KC="65000", P="500", C="300"
+    )
+    assert collar_equal_strikes_note(pos, "BTC") is None
+
+
+def test_non_collar_strategy_gets_no_equal_strikes_note() -> None:
+    pos = HedgePosition(Strategy.PROTECTIVE_PUT, S0="60000", Q="1", H="1", KP="60000", P="500")
+    assert collar_equal_strikes_note(pos, "BTC") is None
+
+
+def test_partial_coverage_note_present_only_when_partial() -> None:
+    partial = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="10", H="4", KC="65000", C="300")
+    full = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="1", H="1", KC="65000", C="300")
+    zero = HedgePosition(Strategy.UNHEDGED, S0="60000", Q="1", H="0")
+    assert partial_coverage_note(partial) is not None
+    assert partial_coverage_note(full) is None
+    assert partial_coverage_note(zero) is None
+
+
+def test_strategy_descriptions_present_for_all_four_strategies() -> None:
+    for strategy in Strategy:
+        text = strategy_description(strategy)
+        assert isinstance(text, str)
+        assert len(text) > 0
+
+
+def test_explanatory_helpers_do_not_alter_underlying_values() -> None:
+    # Presentation helpers must never mutate or misreport the Phase 1
+    # numeric results they explain.
+    pos = HedgePosition(Strategy.COVERED_CALL, S0="60000", Q="10", H="4", KC="65000", C="300")
+    result = analyze(pos)
+    before_h, before_q = pos.H, pos.Q
+    unlimited_max_profit_note(pos, result.max_profit, "BTC")
+    partial_coverage_note(pos)
+    assert pos.H == before_h
+    assert pos.Q == before_q
+    assert result.max_profit.is_unlimited  # unchanged domain result

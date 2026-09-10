@@ -9,7 +9,7 @@ stay as ``Decimal`` through domain evaluation and are only converted to
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import List, Sequence
+from typing import List, Optional, Sequence
 
 import plotly.graph_objects as go
 
@@ -32,7 +32,9 @@ def _unhedged_reference(position: HedgePosition) -> HedgePosition:
     )
 
 
-def build_payoff_figure(position: HedgePosition, grid: Sequence[Decimal]) -> go.Figure:
+def build_payoff_figure(
+    position: HedgePosition, grid: Sequence[Decimal], asset: Optional[str] = None
+) -> go.Figure:
     st_values: List[float] = [float(value) for value in grid]
     strategy_pnl: List[float] = [float(pnl(position, value)) for value in grid]
 
@@ -86,9 +88,10 @@ def build_payoff_figure(position: HedgePosition, grid: Sequence[Decimal]) -> go.
             annotation_position="bottom",
         )
 
+    price_label = f"{asset} Price at Expiry (USD)" if asset else "Underlying Price at Expiry (USD)"
     fig.update_layout(
-        xaxis_title="Hypothetical Terminal Underlying Price ST (USD)",
-        yaxis_title="Portfolio P&L at Expiry (USD)",
+        xaxis_title=price_label,
+        yaxis_title="Portfolio Profit / Loss at Expiry (USD)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=10, r=10, t=40, b=10),
         template="plotly_dark",

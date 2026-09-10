@@ -12,7 +12,7 @@ conversion into a thesis figure -- nothing here is aspirational.
 | `hedgecanvas.live` | Deribit **public** JSON-RPC adapter (`DeribitClient`) plus instrument discovery, index-price/BBO retrieval, sizing, and the `build_*_quote` orchestration functions that turn live market data into `HedgePosition` inputs. |
 | `hedgecanvas.historical` | Read-only frozen-artifact loader/validator: SHA-256 + exact-schema + row-count verification, literal asset/strategy filtering, and stored `wealth_end` extraction. No network code. |
 | `hedgecanvas.ui` | Presentation-only: formatting, Plotly chart builders, and MarketState/HistoricalState -> message mappings. No financial logic. |
-| `app.py` | Streamlit entry point. Sidebar navigation switches between the Live Designer and Historical Evidence renderers; only the selected one executes per rerun. |
+| `app.py` | Streamlit entry point. Sidebar navigation switches between the Live Designer and Historical Backtest renderers; only the selected one executes per rerun. |
 
 ## Two hard-separated data paths
 
@@ -26,7 +26,7 @@ flowchart LR
 
     subgraph HIST["Historical path"]
         E[Frozen production artifacts<br/>strategy_metrics.csv<br/>monthly_backtest_results.csv] --> F[hedgecanvas.historical<br/>hash/schema/row-count<br/>fail-closed validation]
-        F --> G[Streamlit UI<br/>Historical Evidence]
+        F --> G[Streamlit UI<br/>Historical Backtest]
     end
 
     style LIVE fill:#0d1b17,stroke:#00c896,color:#e8ede9
@@ -75,7 +75,7 @@ is enforced by a dedicated automated test
    `hedgecanvas.domain.analyze()` -- the only place payoff, coverage, and
    boundary-scope logic exists -- and the UI renders the returned result.
 
-## Request flow inside Historical Evidence
+## Request flow inside Historical Backtest
 
 1. `hedgecanvas.historical.load_historical_evidence()` resolves the
    artifact directory (`HEDGECANVAS_HISTORICAL_DIR` or the default

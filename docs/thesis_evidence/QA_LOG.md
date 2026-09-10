@@ -186,3 +186,104 @@ real canonical files. Provenance expander confirmed for both artifacts:
   `tests/test_app_smoke.py::test_historical_view_does_not_require_live_api_connectivity`,
   which fails the test if `DeribitClient` is called while Historical
   Evidence is displayed).
+
+## Final UX / comprehension polish pass (after commit bbee2a6)
+
+Terminology changed: "Historical Evidence" -> "Historical Backtest —
+2020–2024" (nav label and page title); "Primary"/"Robustness" ->
+"Main Strategies"/"Wider Strike Settings" (canonical internal
+`HistoricalView.PRIMARY`/`ROBUSTNESS` and strategy-set membership
+unchanged). All values below observed live against the real public
+Deribit API and the real canonical historical artifacts.
+
+### Unlimited Max Profit explanation (partial Covered Call / Collar)
+
+- BTC Covered Call, Q=0.35, H=0.3 (residual 0.05 BTC): metric card showed
+  "Max Profit: Unlimited" with caption "Why unlimited? 0.05 BTC remains
+  uncapped. Above the call strike, only this residual position continues
+  to benefit from further price increases." -- residual matches Q-H
+  exactly.
+- BTC Collar (KP=KC=$60,000, later KP=KC=$72,000), same Q/H: identical
+  correct explanation shown alongside the Collar-specific equal-strikes
+  note (both rendered together, non-contradictory).
+- ETH Collar, Q=4.5, H=4 (residual 0.5 ETH): "Why unlimited? 0.5 ETH
+  remains uncapped..." -- confirmed asset-correct wording.
+- Full-coverage cases (Q=H) throughout the session never showed this
+  note, as expected (Max Profit is finite for full Covered Call/Collar).
+
+### KP == KC Collar explanation
+
+- BTC Collar naturally defaulted to KP=KC=$60,000 at partial coverage
+  (Q=0.35, H=0.3): note read "Put and call strikes are equal on the
+  hedged portion. That portion is effectively locked around this strike
+  at expiry, while the residual 0.05 BTC remains exposed to further price
+  moves." -- correctly did NOT claim the whole portfolio was locked.
+- ETH Collar likewise defaulted to KP=KC=$1,800 at partial coverage
+  (Q=4.5, H=4): "...residual 0.5 ETH remains exposed..." shown correctly.
+- Full-coverage KP==KC case verified deterministically only (see
+  `tests/ui/test_view_models.py::test_full_collar_kp_equals_kc_gets_whole_position_lock_note`)
+  -- no full-coverage KP==KC state occurred naturally during this live
+  session (current listed strikes only produced full coverage at Q=1.0
+  BTC / Q=4.0 ETH with default distinct KP/KC selections).
+
+### KP-driven KC auto-adjustment feedback
+
+- BTC Collar: KP changed 60000 -> 72000 while KC was set to 70000 (now
+  invalid, since 70000 < 72000). Observed: KC auto-reset to 72000 (the
+  lowest valid remaining call strike), and the info message "Call strike
+  adjusted because it must be equal to or above the put strike." appeared
+  directly below the Call strike control.
+- Manually changing KC directly to a still-valid strike (e.g. 70000, a
+  valid choice under the KP in effect at the time) produced NO adjustment
+  message, confirming it only fires for genuine automatic resets.
+- Changing quantity alone (unrelated to KP/KC) did not spuriously
+  re-trigger the message.
+
+### Responsive / Option Cost/Credit clipping
+
+Manually verified at 100% browser zoom, three viewport widths, in the
+Live Designer (BTC and ETH, Unhedged/Covered Call/Collar):
+
+- **1440x900**: no clipping anywhere; Max Profit, Max Loss, Breakeven,
+  Option Cost/Credit, S0/Q/Portfolio Value, and Hedge coverage cards all
+  fully readable.
+- **1366x768**: same -- no clipping.
+- **~1024px wide**: initial layout (2-up Max Profit/Max Loss, 4-across S0
+  row, 3-across coverage row) DID clip at this width (e.g. "Unli...",
+  "$1,2...", "$77,21..."). Fixed by stacking Max Profit/Max Loss/
+  Breakeven/Option Cost/Credit to one full-width metric per row, splitting
+  the top S0 status row into two 2-column rows instead of four across,
+  and splitting Hedge coverage into a 2-up + 1 full-width row instead of
+  3-across. Re-verified after the fix: no clipping at 1024px for any of
+  Max Profit/Best-Case P&L, Max Loss, Breakeven, Option Cost/Credit, S0,
+  Q, Portfolio Value, or the three coverage quantities. The Quote Details
+  section (put/call leg cards) uses markdown text rather than `st.metric`
+  and was never clipped at any tested width.
+
+### Historical Backtest terminology (live-verified)
+
+- Page title: "Historical Backtest — 2020–2024"; subtitle: "See how BTC
+  or ETH portfolios evolved under the different protection strategies in
+  the frozen thesis backtest. These are historical results, not live data
+  or forecasts."; secondary badge retained: "Verified frozen thesis
+  evidence".
+- View control options read "Main Strategies" / "Wider Strike Settings";
+  selecting each produced the exact canonical strategy sets (confirmed by
+  the rendered legend/table: Main Strategies -> Unhedged Benchmark/
+  Protective Put 95/Covered Call 105/Collar 95/105; Wider Strike Settings
+  -> Unhedged Benchmark/Protective Put 90/Covered Call 110/Collar 90/110)
+  for both BTC and ETH.
+- "What do these strategies mean?" expander showed target-language
+  explanations ("approximately 95% put-strike target", etc.) -- never
+  claimed an exact realized strike percentage.
+- Wealth chart: title "Portfolio Wealth Over Time", y-axis "Portfolio
+  Wealth Index (Start = 100)", x-axis "Month", with caption explaining
+  100 is a normalized starting value, not an account balance.
+- "What do these metrics mean?" expander showed the five required
+  explanations (Max Monthly Drawdown, Downside Deviation, Sortino Ratio,
+  Net Premium Cost, Upside Shortfall) with correct cumulative/non-averaged
+  wording for the last two.
+- Fail-closed state (no `HEDGECANVAS_HISTORICAL_DIR`, no default-location
+  files) re-verified after all changes: "Evidence unavailable" badge,
+  clean error message, same placement instructions, no crash; Live
+  Designer confirmed fully functional immediately before and after.

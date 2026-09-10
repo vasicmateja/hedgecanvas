@@ -35,8 +35,8 @@ def build_wealth_path_figure(
         )
 
     fig.update_layout(
-        xaxis_title="decision_month",
-        yaxis_title="Stored Normalized Wealth Index",
+        xaxis_title="Month",
+        yaxis_title="Portfolio Wealth Index (Start = 100)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         margin=dict(l=10, r=10, t=40, b=10),
         template="plotly_dark",

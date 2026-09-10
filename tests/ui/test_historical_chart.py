@@ -26,5 +26,5 @@ def test_wealth_chart_only_includes_view_strategies() -> None:
 def test_wealth_chart_axis_titles() -> None:
     df = pd.DataFrame(default_monthly_rows())
     fig = build_wealth_path_figure(df, "BTC", HistoricalView.PRIMARY)
-    assert fig.layout.xaxis.title.text == "decision_month"
-    assert fig.layout.yaxis.title.text == "Stored Normalized Wealth Index"
+    assert fig.layout.xaxis.title.text == "Month"
+    assert fig.layout.yaxis.title.text == "Portfolio Wealth Index (Start = 100)"

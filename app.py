@@ -39,6 +39,8 @@ from hedgecanvas.historical import (
     filter_metrics,
     load_historical_evidence,
     resolve_historical_dir,
+    strategies_for_view,
+    strategy_display_label,
 )
 from hedgecanvas.live import (
     DeribitClient,
@@ -56,7 +58,14 @@ from hedgecanvas.ui.chart import build_payoff_figure
 from hedgecanvas.ui.formatting import format_quantity, format_usd, parse_decimal_input
 from hedgecanvas.ui.historical_chart import build_wealth_path_figure
 from hedgecanvas.ui.historical_messages import describe_historical_state
-from hedgecanvas.ui.historical_view_models import build_metrics_table
+from hedgecanvas.ui.historical_view_models import (
+    HISTORICAL_METRIC_EXPLANATIONS,
+    build_metrics_table,
+    historical_strategy_explanation,
+    historical_view_display_label,
+    historical_view_explanation,
+    historical_view_from_display_label,
+)
 from hedgecanvas.ui.instrument_select import (
     call_strikes_at_or_above,
     calls_only,
@@ -74,9 +83,13 @@ from hedgecanvas.ui.state import (
     compute_request_key,
     get_snapshot_for_key,
     invalidate_for_asset_change,
+    should_show_call_strike_adjusted_message,
     store_snapshot,
 )
 from hedgecanvas.ui.view_models import (
+    CALL_STRIKE_HELP,
+    PUT_STRIKE_HELP,
+    collar_equal_strikes_note,
     format_breakeven,
     format_coverage_state,
     format_max_loss,
@@ -86,6 +99,9 @@ from hedgecanvas.ui.view_models import (
     format_upside_cap,
     is_max_profit_negative,
     max_profit_metric_label,
+    partial_coverage_note,
+    strategy_description,
+    unlimited_max_profit_note,
 )
 
 ASSETS = ("BTC", "ETH")
@@ -199,6 +215,7 @@ def render_live_designer() -> None:
             st.session_state.pop("expiry_select", None)
             st.session_state.pop("put_strike_select", None)
             st.session_state.pop("call_strike_select", None)
+            st.session_state.pop("_kc_tracked_valid", None)
 
         st.divider()
         st.subheader("Portfolio")
@@ -233,6 +250,7 @@ def render_live_designer() -> None:
             "Collar": Strategy.COLLAR,
         }
         strategy = strategy_map[strategy_label]
+        st.caption(strategy_description(strategy))
 
         needs_put = strategy in (Strategy.PROTECTIVE_PUT, Strategy.COLLAR)
         needs_call = strategy in (Strategy.COVERED_CALL, Strategy.COLLAR)
@@ -244,7 +262,9 @@ def render_live_designer() -> None:
         index_result = fetch_index_price(client, price_index_name)
 
     st.markdown("---")
-    status_col, s0_col, q_col, value_col = st.columns(4)
+    # Two rows of two columns rather than four across -- four-across was
+    # clipping values at ~1024px-wide desktop viewports.
+    status_col, s0_col = st.columns(2)
 
     if not index_result.ok:
         display = describe_market_state(index_result.state)
@@ -261,6 +281,7 @@ def render_live_designer() -> None:
             f"Source: {price_index_name} · "
             f"{index_result.value.retrieved_at.strftime('%Y-%m-%d %H:%M:%S UTC')}"
         )
+    q_col, value_col = st.columns(2)
 
     # -- resolve Q from the chosen input mode ---------------------------------
 
@@ -349,6 +370,7 @@ def render_live_designer() -> None:
                     put_strikes,
                     format_func=lambda k: format_usd(k),
                     key="put_strike_select",
+                    help=PUT_STRIKE_HELP,
                 )
                 put_instrument = instrument_by_strike(put_instruments, expiration_timestamp, put_strike)
 
@@ -357,13 +379,26 @@ def render_live_designer() -> None:
                     call_strikes = call_strikes_at_or_above(
                         call_instruments, expiration_timestamp, put_strike
                     )
-                    helper_text = "Restricted to KC >= KP."
+                    helper_text = f"{CALL_STRIKE_HELP} Restricted to values at or above the put strike."
                 else:
                     call_strikes = strikes_for_expiry(call_instruments, expiration_timestamp)
-                    helper_text = None
+                    helper_text = CALL_STRIKE_HELP
                 if not call_strikes:
                     st.warning("No eligible call strikes at or above KP for this expiry.")
                     st.stop()
+
+                # KP-driven KC auto-adjustment: if the previously selected KC
+                # is no longer valid for the current KP, clear the stale
+                # widget value so Streamlit falls back to a valid default,
+                # and remember to tell the user why it changed.
+                previous_kc = st.session_state.get("call_strike_select")
+                had_prior_tracked_kc = "_kc_tracked_valid" in st.session_state
+                show_kc_adjusted_message = should_show_call_strike_adjusted_message(
+                    previous_kc, call_strikes, had_prior_tracked_kc
+                )
+                if previous_kc is not None and previous_kc not in call_strikes:
+                    del st.session_state["call_strike_select"]
+
                 call_strike = st.selectbox(
                     "Call strike (KC)",
                     call_strikes,
@@ -371,6 +406,9 @@ def render_live_designer() -> None:
                     key="call_strike_select",
                     help=helper_text,
                 )
+                st.session_state["_kc_tracked_valid"] = call_strike
+                if show_kc_adjusted_message:
+                    st.info("Call strike adjusted because it must be equal to or above the put strike.")
                 call_instrument = instrument_by_strike(call_instruments, expiration_timestamp, call_strike)
 
         refresh_clicked = False
@@ -442,11 +480,11 @@ def render_live_designer() -> None:
         st.subheader("Protected Strategy vs Unhedged Portfolio")
         strikes = [k for k in (position.KP, position.KC) if k is not None]
         grid = build_scenario_grid(S0, strikes)
-        fig = build_payoff_figure(position, grid)
+        fig = build_payoff_figure(position, grid, asset=asset)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "The payoff chart shows deterministic portfolio P&L at option expiry for hypothetical "
-            "terminal prices. Terminal price ST is a scenario input, not a forecast."
+            f"Each point shows portfolio profit or loss at option expiry if {asset} finishes "
+            "at that terminal price (ST). Terminal price is a scenario, not a forecast."
         )
 
     with metrics_col:
@@ -457,17 +495,22 @@ def render_live_designer() -> None:
                 "overlay could be constructed (H = 0). The metrics and chart below reflect the "
                 "unhedged underlying position only."
             )
-        m1, m2 = st.columns(2)
-        m1.metric(max_profit_metric_label(result.max_profit), format_max_profit(result.max_profit))
-        m2.metric("Max Loss", format_max_loss(result.max_loss))
+        # Each metric gets the full card width -- a squeezed multi-up grid
+        # here was clipping longer values (e.g. "Unlimited", large dollar
+        # amounts) at common desktop widths (~1024px and narrower).
+        st.metric(max_profit_metric_label(result.max_profit), format_max_profit(result.max_profit))
+        st.metric("Max Loss", format_max_loss(result.max_loss))
         if is_max_profit_negative(result.max_profit):
             st.caption(
-                "Max Profit is negative: even the best-case terminal price for this strategy at the "
-                "selected strikes results in a net loss."
+                "Even the best-case terminal price for this strategy at the selected "
+                "strikes results in a net loss."
             )
-        m3, m4 = st.columns(2)
-        m3.metric("Breakeven", format_breakeven(result.breakeven))
-        m4.metric("Net Option Cost / Credit", format_net_option_cost(position))
+        unlimited_note = unlimited_max_profit_note(position, result.max_profit, asset)
+        if unlimited_note:
+            st.caption(unlimited_note)
+
+        st.metric("Breakeven", format_breakeven(result.breakeven))
+        st.metric("Option Cost / Credit", format_net_option_cost(position))
 
         floor_text = format_protection_floor(position, result.protection_floor_scope)
         cap_text = format_upside_cap(position, result.upside_cap_scope)
@@ -475,17 +518,25 @@ def render_live_designer() -> None:
             st.markdown(f"**Protection floor:** {floor_text}")
         if cap_text:
             st.markdown(f"**Upside cap:** {cap_text}")
+        equal_strike_note = collar_equal_strikes_note(position, asset)
+        if equal_strike_note:
+            st.info(equal_strike_note)
 
         st.divider()
         st.subheader("Hedge coverage")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Underlying Qty (Q)", f"{format_quantity(position.Q)} {asset}")
-        c2.metric("Hedged Qty (H)", f"{format_quantity(position.H)} {asset}")
-        c3.metric("Residual (Q-H)", f"{format_quantity(position.unhedged_residual_quantity)} {asset}")
+        # Two-up rather than three-up -- a three-column split here was
+        # clipping both labels and values at ~1024px-wide desktop viewports.
+        cov1, cov2 = st.columns(2)
+        cov1.metric("Portfolio Quantity", f"{format_quantity(position.Q)} {asset}")
+        cov2.metric("Hedged Quantity", f"{format_quantity(position.H)} {asset}")
+        st.metric("Unhedged Residual", f"{format_quantity(position.unhedged_residual_quantity)} {asset}")
         st.markdown(
             f"**Coverage:** {format_coverage_state(position.coverage_state)} "
             f"({position.coverage_percentage:.2f}%)"
         )
+        coverage_note = partial_coverage_note(position)
+        if coverage_note:
+            st.caption(coverage_note)
 
     # -- Quote details ---------------------------------------------------------
 
@@ -524,7 +575,7 @@ def render_live_designer() -> None:
 
     st.divider()
     st.caption(
-        "Historical Evidence (frozen thesis backtest output) is available from the sidebar "
+        "Historical Backtest (frozen 2020-2024 thesis results) is available from the sidebar "
         "navigation. It uses a separate, frozen dataset -- current live contracts shown above "
         "are not the same instruments as those historical observations."
     )
@@ -536,9 +587,11 @@ def render_live_designer() -> None:
 
 
 def render_historical_evidence() -> None:
-    st.title("Historical Thesis Evidence")
+    st.title("Historical Backtest — 2020–2024")
     st.markdown(
-        '<div class="hc-subtitle">Frozen Deribit/Tardis backtest evidence</div>',
+        '<div class="hc-subtitle">See how BTC or ETH portfolios evolved under the different '
+        "protection strategies in the frozen thesis backtest. These are historical results, "
+        "not live data or forecasts.</div>",
         unsafe_allow_html=True,
     )
 
@@ -580,9 +633,9 @@ def render_historical_evidence() -> None:
                 st.code(artifact_result.message)
 
     st.caption(
-        "Historical results are sample-specific and do not predict future performance. "
-        "Historical Evidence is frozen Deribit/Tardis thesis output; the Live Designer (sidebar) "
-        "uses current Deribit public-market data. Current live contracts are not the same "
+        "Historical results are sample-specific and do not predict future performance. This "
+        "backtest is frozen Deribit/Tardis thesis output; the Live Designer (sidebar) uses "
+        "current Deribit public-market data. Current live contracts are not the same "
         "instruments as these historical observations."
     )
 
@@ -599,17 +652,32 @@ def render_historical_evidence() -> None:
     with control_col1:
         hist_asset = st.selectbox("Asset", CANONICAL_ASSETS, key="hist_asset_select")
     with control_col2:
-        view_label = st.radio("View", ("Primary", "Robustness"), key="hist_view_select", horizontal=True)
-    view = HistoricalView.PRIMARY if view_label == "Primary" else HistoricalView.ROBUSTNESS
+        view_options = (
+            historical_view_display_label(HistoricalView.PRIMARY),
+            historical_view_display_label(HistoricalView.ROBUSTNESS),
+        )
+        view_label = st.radio("View", view_options, key="hist_view_select", horizontal=True)
+    view = historical_view_from_display_label(view_label)
+    st.caption(historical_view_explanation(view))
 
-    st.subheader("Stored Wealth Path")
+    view_strategies = strategies_for_view(view)
+    with st.expander("What do these strategies mean?"):
+        for strategy_key in view_strategies:
+            explanation = historical_strategy_explanation(strategy_key)
+            if explanation:
+                st.markdown(f"**{strategy_display_label(strategy_key)}** -- {explanation}")
+
+    st.subheader("Portfolio Wealth Over Time")
     if evidence.wealth_available:
         assert evidence.wealth.dataframe is not None
         fig = build_wealth_path_figure(evidence.wealth.dataframe, hist_asset, view)
         st.plotly_chart(fig, use_container_width=True)
         st.caption(
-            "Chart plots the frozen stored `wealth_end` values directly, in `decision_month` order. "
-            "No wealth reconstruction, cumulative-product, or renormalization is performed."
+            "All strategies use the same starting index (100) so their historical growth can "
+            "be compared directly -- 100 is a normalized starting value, not an actual account "
+            "balance. Chart plots the frozen stored `wealth_end` values directly, in "
+            "`decision_month` order; no wealth reconstruction, cumulative-product, or "
+            "renormalization is performed."
         )
     else:
         display = describe_historical_state(evidence.wealth.state)
@@ -628,6 +696,9 @@ def render_historical_evidence() -> None:
             "Net Premium Cost and Upside Shortfall are cumulative stored values, not annualized "
             "or averaged. All figures are read directly from the frozen production artifact."
         )
+        with st.expander("What do these metrics mean?"):
+            for metric_label, explanation in HISTORICAL_METRIC_EXPLANATIONS.items():
+                st.markdown(f"**{metric_label}** -- {explanation}")
     else:
         display = describe_historical_state(evidence.metrics.state)
         getattr(st, display.severity)(display.message)
@@ -645,7 +716,7 @@ st.markdown(PAGE_CSS, unsafe_allow_html=True)
 
 with st.sidebar:
     nav_choice = st.radio(
-        "View", ("Live Designer", "Historical Evidence"), key="nav_view_select"
+        "View", ("Live Designer", "Historical Backtest"), key="nav_view_select"
     )
     st.divider()
 

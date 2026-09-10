@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Any, MutableMapping, Optional, Tuple
+from typing import Any, MutableMapping, Optional, Sequence, Tuple
 
 RequestKey = Tuple[Any, ...]
 
@@ -97,3 +97,32 @@ def invalidate_for_asset_change(
         session_state.pop(key, None)
     session_state[_LAST_ASSET_KEY] = new_asset
     return True
+
+
+def call_strike_needs_reset(
+    previous_selected: Optional[Decimal], valid_call_strikes: Sequence[Decimal]
+) -> bool:
+    """True when a previously selected call strike is no longer a valid
+    choice for the current put strike (KP changed such that KC < KP is no
+    longer offered). ``previous_selected`` being None (no prior selection,
+    e.g. first render) is never a reset.
+    """
+    if previous_selected is None:
+        return False
+    return previous_selected not in valid_call_strikes
+
+
+def should_show_call_strike_adjusted_message(
+    previous_selected: Optional[Decimal],
+    valid_call_strikes: Sequence[Decimal],
+    had_prior_tracked_value: bool,
+) -> bool:
+    """True only for a genuine automatic KC adjustment: there was a
+    meaningfully tracked prior selection (not the very first render) AND
+    that selection is no longer valid for the current KP. False whenever
+    the prior KC is still valid (including an ordinary manual re-selection
+    of a different, still-valid KC) or there was no prior selection yet.
+    """
+    if not had_prior_tracked_value:
+        return False
+    return call_strike_needs_reset(previous_selected, valid_call_strikes)
